@@ -1,0 +1,457 @@
+IDS Final Project: Predicting stock market performance based on multi-attribute data
+Introduction
+In this project, I will explore trends in the stock market as related to real-world events  to predict future stock market performance. This project explores bivariate fitting, multivariate regression models, and machine learning components to generate predictions on the stock market based on several other selected attributes over an intersecting time range.
+
+Import Libraries
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from IPython.core.display import display, HTML
+import re
+from sklearn import linear_model
+
+# Original progress bar thanks to https://stackoverflow.com/questions/3173320/text-progress-bar-in-terminal-with-block-characters
+def print_progress_bar(iteration, total, prefix = "", suffix = "", decimals = 1, length = 100, fill = "█", printEnd = "\r"):
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filledLength = int(length * iteration // total)
+    bar = fill * filledLength + '-' * (length - filledLength)
+    print(f"\r{prefix} |{bar}| {percent}% {suffix}", end = printEnd)
+    if iteration == total: 
+        print()
+
+# Squares of the residuals calculation
+error = lambda trend: np.sum((np.polyval(trend, x) - y) ** 2)
+
+# Time constraint
+start = "2017-1-1"
+end = "2017-12-31"
+
+# Data range
+idx = pd.date_range(start, end, freq = "D")
+
+# === User interaction - display settings ===
+
+# possible_days = [i.strftime("%Y-%m-%d") for i in list(idx)]
+# length = str(len(possible_days) - 1)
+# possible_days = "[\"" + "\",\"".join(possible_days) + "\"]"
+
+# html = HTML("""
+# <h4>Sample data from range:</h4>
+# <label for = "start"><b>From:</b> </label><input type = "range" id = "start" min = 0 value = 0 max = """ + length + """></input>
+# <label id = "start-label" for = "start"></label>
+# </br>
+# <label for = "end"><b>To:</b> </label><input type = "range" id = "end" min = 0 value = """ + length + """ max = """ + length + """></input>
+# <label id = "end-label" for = "end"></label>
+# <script>
+# var start = document.getElementById("start")
+# var start_label = document.getElementById("start-label")
+# var end = document.getElementById("end")
+# var end_label = document.getElementById("end-label")
+# var possible_days = """ + possible_days + """
+# var lookup = (value) => possible_days[value]
+
+# setInterval(() => {
+#     try {
+#         start_label.innerText = "\t" + lookup(start.value)
+#         end_label.innerText = "\t" + lookup(end.value)
+#     }
+#     catch {}
+# }, 10)
+# </script>
+# """)
+# display(html)
+
+# input("\nPress enter to continue ")
+# start = re.match(r"(?<=\<label id \= \"start-label\" for \= \"start\"\>)(?=\<\/label\>)", html.data)
+# end = re.match(r"(?<=\<label id \= \"end-label\"  for \= \"end\"\>)(?=\<\/label\>)", html.data)
+# print("User preferences saved")
+Exploring the Data
+Stock market data
+For this project I will be focusing on Apple stock data. Here I clean and explore the data.
+
+dataset = "/kaggle/input/price-volume-data-for-all-us-stocks-etfs/Stocks/aapl.us.txt"
+data = pd.read_csv(dataset)
+
+data["Date"] = pd.to_datetime(data["Date"])
+data = data.set_index("Date")
+
+print(data.head())
+
+data = data.loc[start:end]
+data = data.reindex(index = idx)
+data = data.interpolate(method = "linear", limit_direction = "forward")
+data = data.drop_duplicates()
+
+# Sample and explore data
+
+plt.plot(data.index, data["Close"])
+plt.title("Apple Stock Value Over Time")
+plt.xlabel("Date")
+plt.ylabel("Value")
+plt.show()
+               Open     High      Low    Close    Volume  OpenInt
+Date                                                             
+1984-09-07  0.42388  0.42902  0.41874  0.42388  23220030        0
+1984-09-10  0.42388  0.42516  0.41366  0.42134  18022532        0
+1984-09-11  0.42516  0.43668  0.42516  0.42902  42498199        0
+1984-09-12  0.42902  0.43157  0.41618  0.41618  37125801        0
+1984-09-13  0.43927  0.44052  0.43927  0.43927  57822062        0
+
+Weather data
+The dataset I use includes a large selection of severe weather events that occur across the United States. I can model these by first decompressing the original date ranges provided with each weather event in the overlapping period of time. This data includes the severity of weather events across the United States between date ranges, and I can convert this format into a legible dataset for my model's purposes. To do this, the severity of overlapping weather events are summed to acquire a net weather severity in a day in the US.
+
+weather = pd.read_csv("/kaggle/input/us-weather-events/WeatherEvents_Jan2016-Dec2021.csv")
+
+weather["StartDate"] = pd.to_datetime(weather["StartTime(UTC)"]).dt.normalize()
+weather["EndDate"] = pd.to_datetime(weather["EndTime(UTC)"]).dt.normalize()
+
+weather = weather[weather["TimeZone"] == "US/Mountain"]
+
+print(weather.head())
+  EventId  Type Severity       StartTime(UTC)         EndTime(UTC)  \
+0     W-1  Snow    Light  2016-01-06 23:14:00  2016-01-07 00:34:00   
+1     W-2  Snow    Light  2016-01-07 04:14:00  2016-01-07 04:54:00   
+2     W-3  Snow    Light  2016-01-07 05:54:00  2016-01-07 15:34:00   
+3     W-4  Snow    Light  2016-01-08 05:34:00  2016-01-08 05:54:00   
+4     W-5  Snow    Light  2016-01-08 13:54:00  2016-01-08 15:54:00   
+
+   Precipitation(in)     TimeZone AirportCode  LocationLat  LocationLng  \
+0               0.00  US/Mountain        K04V      38.0972    -106.1689   
+1               0.00  US/Mountain        K04V      38.0972    -106.1689   
+2               0.03  US/Mountain        K04V      38.0972    -106.1689   
+3               0.00  US/Mountain        K04V      38.0972    -106.1689   
+4               0.00  US/Mountain        K04V      38.0972    -106.1689   
+
+       City    County State  ZipCode  StartDate    EndDate  
+0  Saguache  Saguache    CO  81149.0 2016-01-06 2016-01-07  
+1  Saguache  Saguache    CO  81149.0 2016-01-07 2016-01-07  
+2  Saguache  Saguache    CO  81149.0 2016-01-07 2016-01-07  
+3  Saguache  Saguache    CO  81149.0 2016-01-08 2016-01-08  
+4  Saguache  Saguache    CO  81149.0 2016-01-08 2016-01-08  
+Now I can clean the data to decompress these date ranges into separate data points per day. I can first convert the data points in string format to integers with the following dictionary:
+
+"Light": 1,
+"Moderate": 2,
+"Heavy": 3,
+"Severe": 4,
+"Other": 0,
+"UNK": 0
+Then, the severity of all weather events with overlapping days can be summed to generate a sort of normalized index for daily weather severity.
+
+str_to_int = {
+    "Light": 1,
+    "Moderate": 2,
+    "Heavy": 3,
+    "Severe": 4,
+    "Other": 0,
+    "UNK": 0
+}
+
+decomp_weather = weather.replace({"Severity": str_to_int})
+decomp_weather = decomp_weather.set_index("StartDate")
+decomp_weather = decomp_weather.loc[start:end]
+decomp_weather = decomp_weather.reset_index()
+
+new_weather = pd.DataFrame(columns = ["Date", "Severity"])
+length = len(decomp_weather)
+for key, value in decomp_weather.iterrows():
+    date_range = pd.date_range(decomp_weather["StartDate"][key], decomp_weather["EndDate"][key], freq = "D")
+    for i in date_range:
+        new_weather = new_weather.append({"Date": i.strftime("%Y-%m-%d"), "Severity": decomp_weather["Severity"][key]}, ignore_index = True)
+    print_progress_bar(key, length, prefix = "Decompressing date ranges... ", suffix = "", length = 50)
+new_weather["Date"] = pd.to_datetime(new_weather["Date"]).dt.normalize()
+new_weather = new_weather.set_index("Date")
+new_weather["Severity"] = new_weather.groupby(["Date"])["Severity"].sum()
+new_weather = new_weather.drop_duplicates()
+
+new_weather = new_weather.fillna(method = "pad")
+new_weather = new_weather.sort_index()
+
+plt.plot(new_weather.index, new_weather["Severity"])
+plt.title("Weather Severity Across US")
+plt.ylabel("Weather Severity Index")
+plt.xlabel("Date")
+plt.show()
+Decompressing date ranges...  |█████████████████████████████████████████████████-| 100.0% 
+
+GDP data
+I will also consider GDP over the specified period of time, and interpolate between date ranges for daily data to match in format with the dataset collection thus far. This will make normalizing and compressing the data much easier later on.
+
+gdp = "/kaggle/input/us-gdp-growth-rate/GDP.csv"
+gdp = pd.read_csv(gdp)
+
+print(gdp.head())
+
+gdp = gdp.loc[280:283]
+gdp["Date"] = pd.to_datetime(gdp["DATE"]).dt.normalize()
+gdp = gdp.set_index("Date")
+
+gdp = gdp.reindex(index = idx)
+gdp = gdp.interpolate(method = "linear", limit_direction = "forward")
+
+plt.plot(gdp.index, gdp["GDP"])
+plt.show()
+         DATE      GDP
+0  1947-01-01  243.164
+1  1947-04-01  245.968
+2  1947-07-01  249.585
+3  1947-10-01  259.745
+4  1948-01-01  265.742
+
+Season data
+Here I develop a small proxy set of qualitative data points for seasonal change, where lower values represent lower temperatures, according to the following dictionary:
+
+"Winter" : 1 : 1/1-2/31,
+"Spring" : 2 : 3/1-5/31,
+"Summer" : 3 : 6/1-8/31,
+"Fall"   : 2 : 9/1-12/31
+seasonal_data = [
+    {"start": "01-01", "value": 1.0, "season": "winter"},
+    {"start": "04-01", "value": 2.0, "season": "spring"},
+    {"start": "07-01", "value": 3.0, "season": "summer"},
+    {"start": "10-01", "value": 2.0, "season": "fall"},
+    {"start": "12-31", "value": 1.0, "season": "winter"}
+]
+
+season = pd.DataFrame(columns = ["Date", "Season"])
+season = season.set_index("Date")
+season = season.reindex(index = idx)
+for p in seasonal_data:
+    season.loc[str(idx.year[0]) + "-" + p["start"]] = p["value"]
+
+season["Season"] = pd.to_numeric(season["Season"])
+season = season.interpolate()
+
+print(season.head())
+plt.plot(season.index, season["Season"])
+plt.show()
+              Season
+2017-01-01  1.000000
+2017-01-02  1.011111
+2017-01-03  1.022222
+2017-01-04  1.033333
+2017-01-05  1.044444
+
+Compile and Normalize Data
+The datasets will be easier to work with when compiled into a single dataset. It must be normalized through interpolation to the time range.
+
+master = pd.DataFrame()
+master.index = data.index
+master["Stocks"] = data["Close"]
+master["Weather"] = new_weather["Severity"]
+master["GDP"] = gdp["GDP"]
+master["Season"] = season["Season"]
+master = master.reindex(index = idx)
+master = master.interpolate(method = "linear", limit_direction = "forward")
+master["Stocks"] = master["Stocks"].fillna(value = master["Stocks"].min())
+master = master.fillna(method = "bfill")
+master = master.fillna(method = "ffill")
+
+print(master.head())
+print(master.describe())
+
+plt.plot(master.index, master["Stocks"])
+plt.title("Stocks")
+plt.show()
+plt.plot(master.index, master["Weather"])
+plt.title("Weather")
+plt.show()
+plt.title("GDP")
+plt.plot(master.index, master["GDP"])
+plt.show()
+plt.title("Season")
+plt.plot(master.index, master["Season"])
+plt.show()
+            Stocks  Weather           GDP    Season
+2017-01-01  114.19   1188.0  19190.431000  1.000000
+2017-01-02  114.19   1134.5  19192.277867  1.011111
+2017-01-03  114.31   1081.0  19194.124733  1.022222
+2017-01-04  114.19   1396.0  19195.971600  1.033333
+2017-01-05  114.77   1816.0  19197.818467  1.044444
+           Stocks      Weather           GDP      Season
+count  365.000000   365.000000    365.000000  365.000000
+mean   149.769479   720.435616  19611.677770    2.039922
+std     15.953095   399.677847    257.262903    0.533110
+min    114.190000    65.000000  19190.431000    1.000000
+25%    140.000000   411.000000  19359.451802    1.560440
+50%    150.960000   675.000000  19615.043196    2.000000
+75%    159.210000   909.000000  19918.910000    2.500000
+max    175.610000  2237.000000  19918.910000    3.000000
+
+
+
+
+Compare the Datasets
+The compiled datasets can now be compared to obtain correlation data and graph data, which is necessary to determine the next steps–if in any data no significant correlation to the stock data is present.
+
+print("Correlation in the master dataset to set Stocks:")
+print(master.corr()["Stocks"].loc["Weather":])
+
+plt.scatter(master["Weather"], master["Stocks"])
+plt.title("Apple Stock vs. Weather Severity")
+plt.ylabel("Apple Stock")
+plt.xlabel("Weather Severity")
+plt.show()
+
+plt.scatter(master["GDP"], master["Stocks"])
+plt.title("Apple Stock vs. US GDP")
+plt.ylabel("Apple Stock")
+plt.xlabel("GDP")
+plt.show()
+
+plt.scatter(master["Season"], master["Stocks"])
+plt.title("Apple Stock vs. Season")
+plt.ylabel("Apple Stock")
+plt.xlabel("Season")
+plt.show()
+Correlation in the master dataset to set Stocks:
+Weather   -0.143264
+GDP        0.895280
+Season     0.147060
+Name: Stocks, dtype: float64
+
+
+
+Single-Attribute: Stock Market Data Over Time
+This simple model will predict stock market performance over time. This model will simply recognize patterns in the stock market and provide the basis for extrapolation. This step is necessary because it provides the framework for more complex models which will follow.
+
+time_series = master.reset_index()
+
+complexity = 4
+
+x = time_series.index.values
+y = time_series["Stocks"].values
+
+trend = np.polyfit(x, y, complexity)
+fit = np.poly1d(trend)
+plt.scatter(x, y, s = 50, alpha = 0.5)
+plt.plot(x, fit(x), color = "r")
+plt.ylabel("Stock Value")
+plt.xlabel(f"Time Since {start} (days)")
+plt.show()
+
+Extrapolating
+Now I can extrapolate this trend to get our predictions. Here I extrapolate the data by a month.
+
+target = "2018-02-28"
+
+new_idx = pd.date_range(start, target)
+long_series = time_series.set_index("index")
+long_series = long_series.reindex(index = new_idx)
+long_series = long_series.reset_index()
+
+x = long_series.index.values
+y = long_series["Stocks"].values
+
+plt.scatter(x, y, s = 50, alpha = 0.5)
+plt.plot(x, fit(x), color = "r")
+plt.ylabel("Stock Value")
+plt.xlabel(f"Time Since {start} (days)")
+plt.show()
+
+This is a relatively simple way to recognize patterns in the market, but it doesn't give much info as to how trends in the stock market relate to other, more nuanced, attributes. Without taking into consideration any of these attributes, the stock market will appear completely random, and modelling such randomness will likely not turn up any interesting results.
+
+Creating a Multi-Attribute Model
+Using the same method with some linear regression, I can create a multi-attribute model comparing any attribute to the stock data with time. Here I can compress the previous code into a compact function.
+
+def fit_over_time(attr, target = "2018-02-28", complexity = 4):
+    series = master.reset_index()
+    x = series.index.values.astype(float)
+    y = series[attr].values
+    
+    trend = np.polyfit(x, y, complexity)
+    fit = np.poly1d(trend)
+    
+    new_idx = pd.date_range(start, target)
+    new_series = master.reindex(index = new_idx)
+    new_series = new_series.reset_index()
+    
+    x = new_series.index.values
+    y = new_series[attr].values
+    
+    plt.scatter(x, y, s = 50, alpha = 0.5)
+    plt.plot(x, fit(x), color = "r")
+    plt.ylabel(attr)
+    plt.xlabel(f"Time Since {start} (days)")
+    plt.show()
+    
+    return fit
+
+stocks_fit = fit_over_time("Stocks", complexity = 4)
+gdp_fit = fit_over_time("GDP", complexity = 1)
+season_fit = fit_over_time("Season", complexity = 4)
+weather_fit = fit_over_time("Weather", complexity = 4)
+
+
+
+
+Any of the attributes can now be predicted over time, by calling stocks_fit(day) but this won't help with information in relation to stock data. Now we need to compare the variables against each other through a process called multivariate linear regression.
+
+Bivariate Linear Regression
+I just modelled the attributes over time, so now I have the basic framework for modelling the attributes against stock performance.
+
+def fit_over_stocks(attr, complexity = 4):
+    series = master.reset_index()
+    x = series[attr].values.astype(float)
+    y = series["Stocks"].values.astype(float)
+    
+    trend = np.polyfit(x, y, complexity)
+    fit = np.poly1d(trend)
+    
+    plt.scatter(x, y, s = 50, alpha = 0.5)
+    plt.plot(x, fit(x), color = "r")
+    plt.ylabel("Stock Performance")
+    plt.xlabel(attr)
+    plt.show()
+    
+    return fit
+
+predict_from_gdp = fit_over_stocks("GDP", complexity = 4)
+predict_from_season = fit_over_stocks("Season", complexity = 4)
+predict_from_weather = fit_over_stocks("Weather", complexity = 2)
+
+
+
+In the same way as last time, I can now get a prediction by calling predict_from_gdp(gdp).
+
+Multivariate Linear Regression
+Now I can synthesize all the information I just explored through multivariate linear regression, which will tie all of the attributes together in a single function.
+
+X = master[["Season", "Weather", "GDP"]].values
+y = master["Stocks"].values
+
+regr = linear_model.LinearRegression()
+regr.fit(X, y)
+
+predict = lambda season, weather, gdp: regr.predict([[season, weather, gdp]])[0]
+Although there are too many dimensions to this multivariate regressor function to comfortably model all together, we are now able to predict stock market performance by calling predict(season, weather, gdp). This function will return the stock market data given those variables.
+
+print(predict(1, 2000, 19900))
+165.084925092739
+Here's what the model looks like:
+
+coef = regr.coef_
+inter = regr.intercept_
+
+print("Coefficients:", regr.coef_)
+print("Intercept:", regr.intercept_)
+print("Equation:", f"y = s{coef[0]} + w{coef[1]} + g{coef[2]} + {inter}")
+Coefficients: [ 0.0129043  -0.00050316  0.05539876]
+Intercept: -936.3569030705437
+Equation: y = s0.012904303133881016 + w-0.0005031617174796783 + g0.05539875614548282 + -936.3569030705437
+Conclusion
+Through this in-depth exploration of the stock market and attributes related to its performance, I was able to develop predictors for stock market performance over time, weather, seasons, and US GDP, in addition to a multivariate regression model for all selected attributes against stock market performance. I also found that there is (as expected) a strong correlation between GDP and the stock market, in addition to some curious correlation between the stock market and weather. I also spotted seasonal trends relating stock market performance and climate. The techniques I explored throughout this project could be used to expand in reaserch in this topic through exploring more complex attributes and their relationship to more nuanced stock market data.
+
+Recognizing Bias
+This project, of course has many potential sources of bias. One such source of bias resulted from dealing with null values in data. For the weather dataset, I counted null severity as 0 severity, and for other sets where I found gaps, I simply dealt with it by interpolating the gaps. I do feel as though I dealt with these problems in an elegent way, however, because of the ways I worked around these shortcomings in data. For example, 0 severity is simply not counted in the final tally of weather activity in the day, because of the way I extracted the final weather dataset. This seemed like the ideal solution as to prevent bias as much as possible. Bias can also be found where human decision was involved, and this occured throughout, such as when I selected the stock market dataset, time range, and complexity of the models. I was limited in these ways due to 1) a very small period of intersection in time period between the datasets I chose and 2) not enough time to explore alternatives or fine tune these values. Given more time, I would have definitly opted to fine tune complexity and the time range, as well as search for a greater or perhaps more specific intersecting time range in data.
+
+Next Steps
+I feel as though this project is a nice framework for future exploration into this topic, as datasets can simply be substituted, added, or eliminated and the date range for exploration can be tuned to the user's preferences. In the future I would definitely be inclined to explore more stock market data as well as other attributes, and find more time to fine-tune the models to get the desired result with the lowest error.
+
+Appendix
+Project Tracker
+
+Proposal
+
+Slideshow
