@@ -1,0 +1,17 @@
+class Stock:
+    def __init__(self, symbol, shares):
+        self.symbol = symbol
+        self.shares = shares
+
+    def update_shares(self, new_shares):
+        self.shares = new_shares
+
+class Portfolio:
+    def __init__(self):
+        self.stocks = []
+
+    def add_stock(self, stock):
+        self.stocks.append(stock)
+
+    def remove_stock(self, stock):
+        self.stocks.remove(stock)
